@@ -9,12 +9,10 @@ from shapely.geometry.polygon import Polygon
 from shapely.ops import unary_union
 from geopandas.geodataframe import GeoDataFrame
 from pandas.core.frame import DataFrame
-from osm_handler import parse_osm
+from osm_handler import parse_osm, parse_stops
 from typing import List, Iterable, Union, TYPE_CHECKING
 from sqlalchemy import update, text, select
 from collections import defaultdict
-
-from osm_handler import parse_osm, parse_stops
 
 import pandas as pd
 import osmnx as ox
@@ -24,6 +22,7 @@ import io
 import pandas as pd
 import networkx as nx
 import time
+
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -133,7 +132,7 @@ def add_info_to_db(city_df : DataFrame):
     if (not downloaded) and (os.path.exists(file_path)):
         print("ANDO NOW IM HERE")
         add_graph_to_db(city_id=city_id, file_path=file_path, city_name=city_name)
-        add_stops_to_db(city_id=city_id, file_path=file_path)
+        add_stops_and_routes_to_db(city_id=city_id, file_path=file_path)
 
 
 def add_graph_to_db(city_id: int, file_path: str, city_name: str) -> None:
@@ -481,7 +480,6 @@ async def graph_from_ids(city_id : int, regions_ids : List[int], regions : GeoDa
     polygon = polygons_from_region(regions_ids=regions_ids, regions=regions)
     if polygon == None:
         return None, None, None, None
-    getRoutesGraph(city_id)
     return await graph_from_poly(city_id=city_id, polygon=polygon)
     
 def point_obj_to_list(db_record) -> List:
@@ -800,8 +798,10 @@ def get_reversed_graph(graph: DataFrame, way_column: str):
     return edges_df, nodes_df
 
 
-def add_stops_to_db(city_id : int, file_path : str):
+def add_stops_and_routes_to_db(city_id : int, file_path : str):
     routes, stops = parse_stops(file_path)
+    addRoadTypes()
+
     conn = engine.connect()
 
     routesList = []
@@ -809,12 +809,18 @@ def add_stops_to_db(city_id : int, file_path : str):
     edgesList = []
     nodesList = []
 
-    routeTypesDict = {
-        'bus' : 1,
-        'trolleybus' : 2,
-        'tram' : 3,
-        'subway' : 4
-    }
+    node_property_list = []
+    route_property_list = []
+    property_dict = {}
+    routeTypesDict = {}
+    
+    res = conn.execute(select(RoutesTypes))
+    for row in res:
+        routeTypesDict[row.route_type] = row.id
+
+    res = conn.execute(select(NodesPropertyTable))
+    for row in res:
+        property_dict[row.property] = row.id
 
     stop_names = {}
 
@@ -822,9 +828,28 @@ def add_stops_to_db(city_id : int, file_path : str):
         stop_names[stop_id] = stops[stop_id].get("name")
         nodesList.append({
             "id"  : stop_id, 
-            "lon" : stops[stop_id].get("lon"),
-            "lat" : stops[stop_id].get("lat")
+            "longitude" : stops[stop_id].get("longitude"),
+            "latitude" : stops[stop_id].get("latitude")
         })
+        
+        for key2 in stops[stop_id].keys():
+            if key2 == "longitude" or key2 == "latitude":
+                continue
+            prop_id = None
+            if property_dict.get(key2) is not None:
+                prop_id = property_dict.get(key2)
+            else:
+                try:
+                    query = NodesPropertyTable.insert().values(property=f"{key2}")
+                    prop_id = conn.execute(query).inserted_primary_key[0]
+                    prop_id = int(prop_id)
+                    property_dict.update({key2: prop_id})
+                except:
+                    pass
+            if prop_id!= None:
+                node_property_list.append({"id_point": f"{stop_id}",
+                                            "id_property": f"{prop_id}", 
+                                            "value": f"{stops[stop_id][key2]}"})
 
     for route_id in routes.keys():
         # print("route_id =", route_id, routes[route_id].get("name"), routes[route_id].get("type"))
@@ -832,7 +857,7 @@ def add_stops_to_db(city_id : int, file_path : str):
             "id" : route_id,
             "id_city" : city_id,
             "name" : routes[route_id].get("name"),
-            "id_type" : routeTypesDict[routes[route_id].get("type")]
+            "id_type" : routeTypesDict[routes[route_id].get("route")]
             # "id_type" : select(RoutesTypes.c.id).where(RoutesTypes.c.route_type == routeTypesDict[routes[route_id].get("type")])
         })
 
@@ -850,9 +875,34 @@ def add_stops_to_db(city_id : int, file_path : str):
                 "id_node" : id_stop_j,
                 "name" : stop_names[id_stop_j]
             })
-
+        for key2 in routes[route_id].keys():
+            if key2 == "stops":
+                continue
+            prop_id = None
+            if property_dict.get(key2) is not None:
+                prop_id = property_dict.get(key2)
+            else:
+                try:
+                    query = NodesPropertyTable.insert().values(property=f"{key2}")
+                    prop_id = conn.execute(query).inserted_primary_key[0]
+                    prop_id = int(prop_id)
+                    property_dict.update({key2: prop_id})
+                except:
+                    pass
+            if prop_id != None:
+                route_property_list.append({"id_route": f'{route_id}',
+                                        "id_property": f'{prop_id}',
+                                        "value":  f'{routes[route_id][key2]}'})
     try:
         conn.execute(NodesTable.insert(), nodesList)
+    except:
+        pass
+    try:
+        conn.execute(NodesProperty.insert(), node_property_list)
+    except:
+        pass
+    try:
+        conn.execute(RoutesProperty.insert(), route_property_list)
     except:
         pass
     try:
@@ -868,29 +918,34 @@ def add_stops_to_db(city_id : int, file_path : str):
     except:
         pass
 
+    for container in [routes, stops, stopsList, edgesList, nodesList, stop_names, route_property_list, node_property_list]:
+        container.clear()
+
+    conn.close()
+
+
+def addRoadTypes():
+    conn = engine.connect()
     routeTypesList = [
         {"id" : 1, "route_type" : 'bus'},
         {"id" : 2, "route_type" : 'trolleybus'},
         {"id" : 3, "route_type" : 'tram'},
         {"id" : 4, "route_type" : 'subway'}
     ]
+
     try:
         conn.execute(RoutesTypes.insert(), routeTypesList)
     except:
         pass
 
-    for container in [routes, stops, stopsList, edgesList, nodesList, stop_names]:
-        container.clear()
-
     conn.close()
 
 
 def getRoutesGraph(city_id):
-    print('\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n')
     conn = engine.connect()
 
     q = select(RoutesTable).where(RoutesTable.c.id_city == city_id)
-
+    
     routesPd = pd.read_sql_query(q, conn)
     routesPd = routesPd.rename(columns={'id': 'id_route'})
     stopsPd = pd.read_sql_table("Stops", conn)
@@ -906,10 +961,7 @@ def getRoutesGraph(city_id):
     for ost, routes in stop_routes.items():
         for route1 in routes:
             for route2 in routes:
-                print('fuck you, leatherman')
                 adjacency_list[route1].add(route2)
-    print('\n\n')
-    print(adjacency_list)
-    print('\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n')
-    # return adjacency_list
-    
+            adjacency_list[route1].remove(route1)
+
+    return adjacency_list

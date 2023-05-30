@@ -54,6 +54,49 @@ CityPropertyAsync = Table(
 )
 
 
+PointAsync = Table(
+    "Points",
+    metadata,
+    Column("id", BIGINT, primary_key=True, nullable=False),
+    Column("longitude", Float),
+    Column("latitude", Float),
+)
+
+WayAsync = Table(
+    "Ways",
+    metadata,
+    Column("id", BigInteger, primary_key=True, nullable=False),
+    Column("id_city", BigInteger, ForeignKey("Cities.id"), onupdate="CASCADE", nullable=False)
+)
+
+WayPropertyAsync = Table(
+    "WayProperties",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True, nullable=False),
+    Column("id_way", BigInteger, ForeignKey("Ways.id"),onupdate="CASCADE", nullable=False),
+    Column("id_property", BigInteger, ForeignKey("Properties.id"), nullable=False),
+    Column("value", String, nullable=False),
+)
+
+
+EdgesAsync = Table(
+    "Edges",
+    metadata,
+    Column("id",  Integer, primary_key=True, autoincrement=True, nullable=False),
+    Column("id_way", BigInteger, ForeignKey("Ways.id"), nullable=False,onupdate="CASCADE"),
+    Column("id_src", BigInteger, ForeignKey("Points.id"), nullable= False,onupdate="CASCADE"),
+    Column("id_dist", BigInteger, ForeignKey("Points.id"), nullable=False,onupdate="CASCADE")
+)
+
+PointPropertyAsync = Table(
+    "PointProperties",
+    metadata,
+    Column("id",Integer, primary_key=True, autoincrement=True, nullable=False),
+    Column("id_point", BigInteger, ForeignKey("Points.id"), onupdate="CASCADE", nullable=False),
+    Column("id_property", Integer, ForeignKey("Properties.id"), nullable=False),
+    Column("value", String, nullable=False)
+)
+
 # 1 Таблица типов маршрутов (автобус, троллейбус, ...)
 RoutesTypes = Table(
     "Types",
@@ -127,50 +170,6 @@ NodesPropertyTable = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("property", String(50))
 )
-
-PointAsync = Table(
-    "Points",
-    metadata,
-    Column("id", BIGINT, primary_key=True, nullable=False),
-    Column("longitude", Float),
-    Column("latitude", Float),
-)
-
-WayAsync = Table(
-    "Ways",
-    metadata,
-    Column("id", BigInteger, primary_key=True, nullable=False),
-    Column("id_city", BigInteger, ForeignKey("Cities.id"), onupdate="CASCADE", nullable=False)
-)
-
-WayPropertyAsync = Table(
-    "WayProperties",
-    metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True, nullable=False),
-    Column("id_way", BigInteger, ForeignKey("Ways.id"),onupdate="CASCADE", nullable=False),
-    Column("id_property", BigInteger, ForeignKey("Properties.id"), nullable=False),
-    Column("value", String, nullable=False),
-)
-
-
-EdgesAsync = Table(
-    "Edges",
-    metadata,
-    Column("id",  Integer, primary_key=True, autoincrement=True, nullable=False),
-    Column("id_way", BigInteger, ForeignKey("Ways.id"), nullable=False,onupdate="CASCADE"),
-    Column("id_src", BigInteger, ForeignKey("Points.id"), nullable= False,onupdate="CASCADE"),
-    Column("id_dist", BigInteger, ForeignKey("Points.id"), nullable=False,onupdate="CASCADE")
-)
-
-PointPropertyAsync = Table(
-    "PointProperties",
-    metadata,
-    Column("id",Integer, primary_key=True, autoincrement=True, nullable=False),
-    Column("id_point", BigInteger, ForeignKey("Points.id"), onupdate="CASCADE", nullable=False),
-    Column("id_property", Integer, ForeignKey("Properties.id"), nullable=False),
-    Column("value", String, nullable=False)
-)
-
 
 engine = create_engine(DATABASE_URL, echo=True)
 
