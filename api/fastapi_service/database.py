@@ -54,6 +54,80 @@ CityPropertyAsync = Table(
 )
 
 
+# 1 Таблица типов маршрутов (автобус, троллейбус, ...)
+RoutesTypes = Table(
+    "Types",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("route_type", VARCHAR(30))
+)
+
+# 2 Таблица маршрутов
+RoutesTable= Table(
+    "RoutesTable",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("name", String),
+    Column("id_type", BigInteger, ForeignKey("Types.id")),
+    Column("id_city", BigInteger, ForeignKey("Cities.id"))
+)
+
+# 3 Таблица свойств маршрутов
+RoutesProperty = Table(
+    "RoutesProperty",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("id_route", BigInteger, ForeignKey("RoutesTable.id")),
+    Column("id_property", BigInteger, ForeignKey("NodesPropertyTable.id")),
+    Column("value", String),
+)
+
+# 4 Таблица остановок
+StopsTable = Table(
+    "Stops",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", VARCHAR(30)),
+    Column("id_route", BigInteger, ForeignKey("RoutesTable.id")),
+    Column("id_node", BigInteger, ForeignKey("Nodes.id")),
+)
+
+# 5 Таблица координат точек
+NodesTable = Table(
+    "Nodes",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("longitude", Float),
+    Column("latitude", Float),
+)
+
+# 6 Таблица рёбер (id_остановки -> id_остановки)
+EdgesTable = Table(
+    "EdgesTable",
+    metadata,
+    Column("id",  Integer, primary_key=True, autoincrement=True),
+    Column("id_src", BigInteger, ForeignKey("Nodes.id")),
+    Column("id_dest", BigInteger, ForeignKey("Nodes.id"))
+)
+
+# 7 Таблица свойств остановок
+NodesProperty = Table(
+    "NodesProperty",
+    metadata,
+    Column("id",Integer, primary_key=True, autoincrement=True),
+    Column("id_point", BigInteger, ForeignKey("Nodes.id")),
+    Column("id_property", Integer, ForeignKey("NodesPropertyTable.id")),
+    Column("value", String)
+)
+
+# 8 Таблица id_свойств остановок и маршрутов
+NodesPropertyTable = Table(
+    "NodesPropertyTable",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("property", String(50))
+)
+
 PointAsync = Table(
     "Points",
     metadata,

@@ -11,7 +11,10 @@ from geopandas.geodataframe import GeoDataFrame
 from pandas.core.frame import DataFrame
 from osm_handler import parse_osm
 from typing import List, Iterable, Union, TYPE_CHECKING
-from sqlalchemy import update, text
+from sqlalchemy import update, text, select
+from collections import defaultdict
+
+from osm_handler import parse_osm, parse_stops
 
 import pandas as pd
 import osmnx as ox
@@ -130,6 +133,7 @@ def add_info_to_db(city_df : DataFrame):
     if (not downloaded) and (os.path.exists(file_path)):
         print("ANDO NOW IM HERE")
         add_graph_to_db(city_id=city_id, file_path=file_path, city_name=city_name)
+        add_stops_to_db(city_id=city_id, file_path=file_path)
 
 
 def add_graph_to_db(city_id: int, file_path: str, city_name: str) -> None:
@@ -477,6 +481,7 @@ async def graph_from_ids(city_id : int, regions_ids : List[int], regions : GeoDa
     polygon = polygons_from_region(regions_ids=regions_ids, regions=regions)
     if polygon == None:
         return None, None, None, None
+    getRoutesGraph(city_id)
     return await graph_from_poly(city_id=city_id, polygon=polygon)
     
 def point_obj_to_list(db_record) -> List:
@@ -794,3 +799,117 @@ def get_reversed_graph(graph: DataFrame, way_column: str):
     edges_df = df_connections[["src_index", "dest_index"]].drop_duplicates().reset_index(drop=True)
     return edges_df, nodes_df
 
+
+def add_stops_to_db(city_id : int, file_path : str):
+    routes, stops = parse_stops(file_path)
+    conn = engine.connect()
+
+    routesList = []
+    stopsList = []
+    edgesList = []
+    nodesList = []
+
+    routeTypesDict = {
+        'bus' : 1,
+        'trolleybus' : 2,
+        'tram' : 3,
+        'subway' : 4
+    }
+
+    stop_names = {}
+
+    for stop_id in stops.keys():
+        stop_names[stop_id] = stops[stop_id].get("name")
+        nodesList.append({
+            "id"  : stop_id, 
+            "lon" : stops[stop_id].get("lon"),
+            "lat" : stops[stop_id].get("lat")
+        })
+
+    for route_id in routes.keys():
+        # print("route_id =", route_id, routes[route_id].get("name"), routes[route_id].get("type"))
+        routesList.append({
+            "id" : route_id,
+            "id_city" : city_id,
+            "name" : routes[route_id].get("name"),
+            "id_type" : routeTypesDict[routes[route_id].get("type")]
+            # "id_type" : select(RoutesTypes.c.id).where(RoutesTypes.c.route_type == routeTypesDict[routes[route_id].get("type")])
+        })
+
+        countStops = len(routes[route_id].get("stops"))
+        for j in range(0, countStops):
+            id_stop_j = routes[route_id].get("stops")[j]
+
+            if j != countStops - 1:
+                edgesList.append({
+                    "id_src" : id_stop_j, 
+                    "id_dest": routes[route_id].get("stops")[j + 1]
+                })
+            stopsList.append({
+                "id_route": route_id,
+                "id_node" : id_stop_j,
+                "name" : stop_names[id_stop_j]
+            })
+
+    try:
+        conn.execute(NodesTable.insert(), nodesList)
+    except:
+        pass
+    try:
+        conn.execute(RoutesTable.insert(), routesList)
+    except:
+        pass
+    try:
+        conn.execute(StopsTable.insert(), stopsList)
+    except:
+        pass
+    try:
+        conn.execute(EdgesTable.insert(), edgesList)
+    except:
+        pass
+
+    routeTypesList = [
+        {"id" : 1, "route_type" : 'bus'},
+        {"id" : 2, "route_type" : 'trolleybus'},
+        {"id" : 3, "route_type" : 'tram'},
+        {"id" : 4, "route_type" : 'subway'}
+    ]
+    try:
+        conn.execute(RoutesTypes.insert(), routeTypesList)
+    except:
+        pass
+
+    for container in [routes, stops, stopsList, edgesList, nodesList, stop_names]:
+        container.clear()
+
+    conn.close()
+
+
+def getRoutesGraph(city_id):
+    print('\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n')
+    conn = engine.connect()
+
+    q = select(RoutesTable).where(RoutesTable.c.id_city == city_id)
+
+    routesPd = pd.read_sql_query(q, conn)
+    routesPd = routesPd.rename(columns={'id': 'id_route'})
+    stopsPd = pd.read_sql_table("Stops", conn)
+
+    merged_df = routesPd.merge(stopsPd, on="id_route")
+
+    adjacency_list = defaultdict(set)
+
+    # ключами являются идентификаторы маршрутов, а значениями - множества идентификаторов маршрутов
+    stop_routes = stopsPd.groupby("id_node")["id_route"].apply(set).to_dict()
+
+    adjacency_list = defaultdict(set)
+    for ost, routes in stop_routes.items():
+        for route1 in routes:
+            for route2 in routes:
+                print('fuck you, leatherman')
+                adjacency_list[route1].add(route2)
+    print('\n\n')
+    print(adjacency_list)
+    print('\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n')
+    # return adjacency_list
+    
