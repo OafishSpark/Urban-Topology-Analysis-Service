@@ -51,7 +51,64 @@ class HighwayNodesHandler(o.SimpleHandler):
     
             for k, v in dct.items():
                 self.nodes_tags[n.id][k] = v
-            
+ 
+
+class HighwayNodesHandler(o.SimpleHandler):
+   
+    def __init__(self, used_nodes_ids):
+        super(HighwayNodesHandler, self).__init__()
+        self.nodes_tags = used_nodes_ids
+
+    def node(self, n):
+        if n.id in self.nodes_tags.keys():  
+            dct = {tag.k : tag.v for tag in n.tags}
+            if len(dct) == 0:
+                return
+    
+            for k, v in dct.items():
+                self.nodes_tags[n.id][k] = v
+
+
+class RoutesHandler(o.SimpleHandler):
+    def __init__(self):
+        super(RoutesHandler, self).__init__()
+        self.routes_data = {}
+        self.used_stops_ids = {}
+
+
+    def relation(self, r):
+        if "route" in r.tags and (
+            r.tags['route'] == 'bus' or 
+            r.tags['route'] == 'trolleybus' or
+            r.tags['route'] == 'tram' or
+            r.tags['route'] == 'subway'
+        ):
+            members = []
+            for member in r.members:
+                if member.type == 'n':
+                    self.used_stops_ids[int(member.ref)] = {'route_id': r.id}
+
+                    members.append(member.ref)
+                
+            self.routes_data[r.id] = {
+                "stops": members,
+                "name": r.tags.get("colour") if r.tags['route'] == 'subway' else r.tags.get("ref", "none"),
+                "type": r.tags.get("route"),
+            }
+
+
+class StopsHandler(o.SimpleHandler):
+    def __init__(self, used_stops_ids):
+        super(StopsHandler, self).__init__()
+        self.stops_data = used_stops_ids
+
+
+    def node(self, n):
+        if n.id in self.stops_data.keys():  
+            self.stops_data[n.id]['lat'] = n.location.lat
+            self.stops_data[n.id]['lon'] = n.location.lon
+            self.stops_data[n.id]['name'] = n.tags.get("name")     
+
 
 def parse_osm(osm_file_path) -> Tuple[dict, dict]:
     ways = HighwayWaysHandler()
@@ -69,13 +126,20 @@ def parse_osm(osm_file_path) -> Tuple[dict, dict]:
     return ways.ways_tags, nodes.nodes_tags
 
 
-w, n = parse_osm('./Абакан.osm')
+def parse_stops(file_path) -> Tuple[dict, dict]:
+    routes = RoutesHandler()
+    try:
+        routes.apply_file(file_path)
+    except RuntimeError:
+        pass
 
-ways_df = pd.DataFrame(columns=required_ways_tags)
+    stops = StopsHandler(routes.used_stops_ids)
+    try:
+        stops.apply_file(file_path)
+    except RuntimeError:
+        pass
 
-print(ways_df.head())
-
-
+    return routes.routes_data, stops.stops_data        
 
 
 def to_csv(w, n):
@@ -115,3 +179,10 @@ def to_csv(w, n):
 # nodes_ids = set(df_nodes['node_id'])
 
 # print(graph_ids.difference(nodes_ids))
+
+
+w, n = parse_osm('./Абакан.osm')
+
+ways_df = pd.DataFrame(columns=required_ways_tags)
+
+print(ways_df.head())
